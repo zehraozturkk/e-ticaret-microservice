@@ -1,0 +1,115 @@
+services:
+  kafka:
+    image: apache/kafka:4.2.0
+    container_name: kafka
+    ports:
+      - "9092:9092"          # host -> broker (EXTERNAL listener)
+    environment:
+      # --- KRaft kimlik ve roller ---
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller        # tek node hem broker hem controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+ 
+      # --- Listener tanımları ---
+      # Üç ayrı listener: container içi (INTERNAL), host (EXTERNAL), controller
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:19092,EXTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:19092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+ 
+      # --- Tek node olduğu için replikasyon faktörleri 1 ---
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+ 
+      # --- Geliştirme kolaylıkları ---
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0      # consumer'lar hızlı bağlansın
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"        # eğitimde pratik; prod'da false yapın
+      KAFKA_NUM_PARTITIONS: 3                         # otomatik topic'ler 3 partition'la doğsun
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+    networks:
+      - kafka-net
+ 
+  kafka-ui:
+    image: kafbat/kafka-ui:latest     # provectuslabs/kafka-ui'nin aktif geliştirilen fork'u
+    container_name: kafka-ui
+    ports:
+      - "8080:8080"                   # http://localhost:8080
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:19092
+      DYNAMIC_CONFIG_ENABLED: "true"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - kafka-net
+ 
+  product-db:
+    image: postgres:17
+    container_name: product-db
+    command: ["postgres", "-c", "wal_level=logical"]   # Debezium CDC için WAL logical replication açık olmalı
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: test12345
+      POSTGRES_DB: products
+    ports:
+      - "15433:5432" # sağ taraf daima uygulamanın kendi portu
+    volumes:
+      - product-db-data:/var/lib/postgresql/data
+    networks:
+      - kafka-net
+
+  debezium-connect:
+    image: quay.io/debezium/connect:3.0
+    container_name: debezium-connect
+    ports:
+      - "8083:8083"                        # Connector kayıt REST API: http://localhost:8083
+    environment:
+      BOOTSTRAP_SERVERS: kafka:19092
+      GROUP_ID: debezium-connect-group
+      CONFIG_STORAGE_TOPIC: debezium-connect-configs
+      OFFSET_STORAGE_TOPIC: debezium-connect-offsets
+      STATUS_STORAGE_TOPIC: debezium-connect-status
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - kafka-net
+
+  user-db:
+    image: postgres:17
+    container_name: user-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: test12345
+      POSTGRES_DB: users
+    ports:
+      - "15434:5432" # sağ taraf daima uygulamanın kendi portu
+    volumes:
+      - user-db-data:/var/lib/postgresql/data
+      
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pgadmin-gygy5
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+
+volumes:
+  kafka-data:
+  product-db-data:
+  user-db-data:
+ 
+networks:
+  kafka-net:
+    driver: bridge
