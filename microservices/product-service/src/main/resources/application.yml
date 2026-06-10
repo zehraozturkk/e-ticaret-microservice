@@ -2,8 +2,9 @@ spring:
   application:
     name: product-service
   profiles:
-    active: dev
+    active: dev  
   config:
+    # Config Server'dan yapılandırmaları almak için. optional çünkü Config Server çalışmazsa uygulamanın başlamasını engellememek için.
     import: "optional:configserver:http://localhost:8888"
 server:
   port: 8082
