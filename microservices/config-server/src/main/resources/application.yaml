@@ -1,0 +1,16 @@
+spring:
+  application:
+    name: config-server
+  cloud:
+    config:
+      server:
+        git:
+          uri: git@github.com:zehraozturkk/e-ticaret-microservice.git
+          default-label: main
+          search-paths: microservices/configs/{application}
+          clone-on-start: true
+          force-pull: true
+
+server:
+  port: 8888
+          
